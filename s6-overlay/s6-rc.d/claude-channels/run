@@ -12,7 +12,7 @@ run_as_claude() {
   s6-setuidgid claude \
     env HOME="$CLAUDE_HOME" \
         BUN_INSTALL="$CLAUDE_HOME/.bun" \
-        PATH="/usr/local/bin:$CLAUDE_HOME/.bun/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        PATH="$CLAUDE_HOME/.local/bin:/usr/local/bin:$CLAUDE_HOME/.bun/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \
     "$@"
 }
 
