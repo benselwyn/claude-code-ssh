@@ -63,11 +63,9 @@ RUN case "${TARGETARCH:-amd64}" in \
     && tar -C / -Jxpf /tmp/s6-arch.tar.xz \
     && rm -f /tmp/s6-noarch.tar.xz /tmp/s6-arch.tar.xz
 
-# ---------- non-root user -----------------------------------------------------
-RUN useradd -m -s /bin/bash -G sudo claude \
-    && passwd -d claude \
-    && echo "claude ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/claude \
-    && chmod 0440 /etc/sudoers.d/claude
+# ---------- non-root user (no sudo) ------------------------------------------
+RUN useradd -m -s /bin/bash claude \
+    && passwd -d claude
 
 # ---------- Claude Code (installed as claude user) ----------------------------
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
