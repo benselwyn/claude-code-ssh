@@ -1,0 +1,31 @@
+#!/command/with-contenv bash
+
+CLAUDE_HOME=/data/home
+TMUX_SOCK=/tmp/tmux-1001/default
+
+# Ensure tmux socket dir exists with correct ownership
+mkdir -p /tmp/tmux-1001
+chown claude:claude /tmp/tmux-1001
+chmod 700 /tmp/tmux-1001
+
+run_as_claude() {
+  s6-setuidgid claude \
+    env HOME="$CLAUDE_HOME" \
+        BUN_INSTALL="$CLAUDE_HOME/.bun" \
+        PATH="/usr/local/bin:$CLAUDE_HOME/.bun/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    "$@"
+}
+
+start_claude() {
+  run_as_claude tmux -S "$TMUX_SOCK" new-session -d -s main -x 220 -y 50 \
+    "claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official; exec bash"
+}
+
+# Start if not already running
+run_as_claude tmux -S "$TMUX_SOCK" has-session -t main 2>/dev/null || start_claude
+
+# Monitor loop — s6 restarts this script if it exits
+while true; do
+  sleep 30
+  run_as_claude tmux -S "$TMUX_SOCK" has-session -t main 2>/dev/null || start_claude
+done
