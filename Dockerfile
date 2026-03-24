@@ -45,9 +45,9 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# ---------- Node version manager (n) + pnpm -----------------------------------
+# ---------- Node version manager (n) + pnpm + bun ----------------------------
 # hadolint ignore=DL3016
-RUN npm install -g n@10.1.0 pnpm@10.4.1 \
+RUN npm install -g n@10.1.0 pnpm@10.4.1 bun \
     && npm cache clean --force
 
 # ---------- s6-overlay v3 -----------------------------------------------------
@@ -107,7 +107,7 @@ RUN chmod +x /etc/s6-overlay/scripts/init-setup.sh /usr/local/bin/stderr-to-json
 
 # ---------- register s6 services in user bundle -------------------------------
 RUN for svc in /etc/s6-overlay/s6-rc.d/*/type; do \
-        svc_name="$(basename "$(dirname "$svc")")"; \
+        svc_name="$(basename "$(dirname "$svc")")";\
         if [ "$svc_name" != "user" ] && [ "$svc_name" != "user2" ]; then \
             touch "/etc/s6-overlay/s6-rc.d/user/contents.d/${svc_name}"; \
         fi; \
