@@ -2,11 +2,22 @@
 
 CLAUDE_HOME=/data/home
 TMUX_SOCK=/tmp/tmux-1001/default
+SESSION=main
+
+# Memory hygiene (override via Railway variables)
+#   CLAUDE_MAX_RSS_MB   restart when claude + its plugins exceed this (default 1200)
+#   CLAUDE_MAX_AGE_HRS  restart a session older than this (default 24, 0 disables)
+MAX_RSS_MB="${CLAUDE_MAX_RSS_MB:-1200}"
+MAX_AGE_HRS="${CLAUDE_MAX_AGE_HRS:-24}"
 
 # Ensure tmux socket dir exists with correct ownership
 mkdir -p /tmp/tmux-1001
 chown claude:claude /tmp/tmux-1001
 chmod 700 /tmp/tmux-1001
+
+log() {
+  echo "[claude-channels] $*"
+}
 
 run_as_claude() {
   s6-setuidgid claude \
@@ -16,16 +27,74 @@ run_as_claude() {
     "$@"
 }
 
-start_claude() {
-  run_as_claude tmux -S "$TMUX_SOCK" new-session -d -s main -x 220 -y 50 \
-    "claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official; exec bash"
+tmux_c() {
+  run_as_claude tmux -S "$TMUX_SOCK" "$@"
 }
 
-# Start if not already running
-run_as_claude tmux -S "$TMUX_SOCK" has-session -t main 2>/dev/null || start_claude
+has_session() {
+  tmux_c has-session -t "$SESSION" 2>/dev/null
+}
 
-# Monitor loop — s6 restarts this script if it exits
+# No trailing shell: when claude exits, the session ends and the loop restarts it.
+start_claude() {
+  log "starting claude session"
+  tmux_c new-session -d -s "$SESSION" -x 220 -y 50 \
+    "claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official"
+}
+
+stop_claude() {
+  log "stopping claude session: $1"
+  tmux_c kill-session -t "$SESSION" 2>/dev/null
+  # Make sure the channel plugin server does not outlive its parent
+  sleep 2
+  pkill -u claude -f 'claude-plugins-official/telegram' 2>/dev/null || true
+}
+
+# Sum RSS (MB) of the pane process and all its descendants
+session_rss_mb() {
+  local root pids next kb
+  root="$(tmux_c list-panes -t "$SESSION" -F '#{pane_pid}' 2>/dev/null | head -n1)"
+  [ -n "$root" ] || { echo 0; return; }
+  pids="$root"
+  next="$root"
+  while [ -n "$next" ]; do
+    next="$(pgrep -d ' ' -P "${next// /,}" 2>/dev/null)"
+    [ -n "$next" ] && pids="$pids $next"
+  done
+  kb="$(ps -o rss= -p "${pids// /,}" 2>/dev/null | awk '{s+=$1} END {print s+0}')"
+  echo $(( kb / 1024 ))
+}
+
+session_age_hrs() {
+  local created
+  created="$(tmux_c display-message -p -t "$SESSION" '#{session_created}' 2>/dev/null)"
+  [ -n "$created" ] || { echo 0; return; }
+  echo $(( ($(date +%s) - created) / 3600 ))
+}
+
+has_session || start_claude
+
+# Monitor loop (s6 restarts this script if it exits)
 while true; do
   sleep 30
-  run_as_claude tmux -S "$TMUX_SOCK" has-session -t main 2>/dev/null || start_claude
+
+  if ! has_session; then
+    start_claude
+    continue
+  fi
+
+  rss="$(session_rss_mb)"
+  if [ "$rss" -gt "$MAX_RSS_MB" ]; then
+    stop_claude "memory ${rss}MB > ${MAX_RSS_MB}MB"
+    start_claude
+    continue
+  fi
+
+  if [ "$MAX_AGE_HRS" -gt 0 ]; then
+    age="$(session_age_hrs)"
+    if [ "$age" -ge "$MAX_AGE_HRS" ]; then
+      stop_claude "session age ${age}h >= ${MAX_AGE_HRS}h"
+      start_claude
+    fi
+  fi
 done
